@@ -1,0 +1,54 @@
+#!/bin/sh
+### BEGIN INIT INFO
+# Provides:          update_list
+# Required-Start:    $network
+# Required-Stop:     $network
+# Default-Start:     2 3 4 5
+# Default-Stop:      0 1 6
+# Short-Description: Update list script
+### END INIT INFO
+
+start() {
+    echo "Ждём 3 минуты перед запуском update_list.sh..."
+    (sleep 180; /opt/bin/update_list.sh) &
+
+    echo "Запуск фонового процесса для выполнения update_list.sh в 3:00 ночи..."
+    (
+        while true; do
+            CURRENT_TIME=$(date +%H:%M)
+            if [ "$CURRENT_TIME" = "03:00" ]; then
+                /opt/bin/update_list.sh >> /opt/var/log/update_list.log 2>&1
+                sleep 86400  # Спим 24 часа (чтобы не запускаться повторно в этот день)
+            fi
+            sleep 60  # Проверяем время каждую минуту
+        done
+    ) &
+}
+
+stop() {
+    echo "Остановка update_list.sh..."
+    killall update_list.sh
+}
+
+restart() {
+    stop
+    start
+}
+
+case "$1" in
+  start)
+    start
+    ;;
+  stop)
+    stop
+    ;;
+  restart)
+    restart
+    ;;
+  *)
+    echo "Использование: $0 {start|stop|restart}"
+    exit 1
+    ;;
+esac
+
+exit 0
