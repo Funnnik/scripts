@@ -17,7 +17,7 @@ start() {
         while true; do
             CURRENT_TIME=$(date +%H:%M)
             if [ "$CURRENT_TIME" = "03:00" ]; then
-                /opt/bin/update_list.sh >> /opt/var/log/update_list.log 2>&1
+                /opt/bin/update_list.sh
                 sleep 86400  # Спим 24 часа (чтобы не запускаться повторно в этот день)
             fi
             sleep 60  # Проверяем время каждую минуту
