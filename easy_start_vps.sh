@@ -16,30 +16,24 @@ echo "🚀 Начинаем настройку сервера..."
 # --- Обновление ОС ---
 echo "📦 Обновляем систему..."
 apt update && apt upgrade -y
-apt install curl iptables-persistent ufw -y
 
 # --- Настройка UFW ---
 echo "🧱 Настройка UFW..."
-ufw --force disable  # временно отключаем, чтобы не конфликтовал
-apt install -y iptables-persistent netfilter-persistent || true
-
-echo "⚙️ Настройка правил iptables..."
-iptables -F
-iptables -A INPUT -p icmp --icmp-type echo-request -j DROP
-iptables -I INPUT -p icmp --icmp-type echo-request -s 62.105.44.145/29 -j ACCEPT
-iptables -I INPUT -p icmp --icmp-type echo-request -s 188.0.160.0/19 -j ACCEPT
-
-netfilter-persistent save
-systemctl enable netfilter-persistent
-
-echo "🧱 Повторная настройка UFW..."
-ufw --force reset
 ufw default deny incoming
 ufw default allow outgoing
 ufw allow from 62.105.44.145/29 to any port 22
 ufw allow from 188.0.160.0/19 to any port 22
 ufw logging on
-ufw --force enable
+ufw enable
+
+# --- Настройка iptables ---
+echo "⚙️ Настройка iptables..."
+iptables -A INPUT -p icmp --icmp-type echo-request -j DROP
+iptables -I INPUT -p icmp --icmp-type echo-request -s 62.105.44.145/29 -j ACCEPT
+iptables -I INPUT -p icmp --icmp-type echo-request -s 188.0.160.0/19 -j ACCEPT
+apt install iptables-persistent -y
+netfilter-persistent save
+systemctl enable netfilter-persistent
 
 # --- Настройка DoH (DNS over HTTPS) ---
 echo "🌐 Настройка DNS over HTTPS (DoH)..."
