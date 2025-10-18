@@ -7,7 +7,7 @@ set -e  # остановить скрипт при ошибке
 
 # Проверка прав
 if [ "$EUID" -ne 0 ]; then
-  echo "❌ Запусти этот скрипт от root: sudo bash vps-setup.sh"
+  echo "❌ Запусти этот скрипт от root"
   exit 1
 fi
 
