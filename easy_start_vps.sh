@@ -17,6 +17,7 @@ echo "🚀 Начинаем настройку сервера..."
 echo "📦 Обновляем систему..."
 apt update && apt upgrade -y
 apt install ufw -y
+
 # --- Настройка UFW ---
 echo "🧱 Настройка UFW..."
 ufw default deny incoming
