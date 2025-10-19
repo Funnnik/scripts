@@ -24,6 +24,7 @@ sleep 3
 
 echo "📦 Обновляем систему..."
 apt update && apt upgrade -y
+apt autoclean && apt autoremove -y
 apt install -y curl ufw fail2ban htop
 snap install speedtest
 
