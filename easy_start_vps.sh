@@ -37,7 +37,7 @@ ufw allow from 62.105.44.145/29 to any port ssh
 ufw allow from 188.0.160.0/19 to any port ssh
 
 # --- Настройка ICMP (ping) ---
-echo "⚙️ Настраиваем ICMP (ping) ограничения..."
+echo "🔐 Настраиваем ICMP (ping) ограничения..."
 UFW_RULES="/etc/ufw/before.rules"
 if grep -q "# ok icmp codes for INPUT" "$UFW_RULES"; then
   if ! grep -q "Custom ICMP filtering" "$UFW_RULES"; then
@@ -99,7 +99,7 @@ systemctl enable fail2ban
 systemctl start fail2ban
 
 # --- Смена Hostname на localhost ---
-echo "⚙️ Меняем имя на localhost..."
+echo "🔐 Меняем имя на localhost..."
 cp /etc/hosts /etc/hosts.backup
 hostnamectl set-hostname localhost
 tee /etc/hosts > /dev/null <<EOF
