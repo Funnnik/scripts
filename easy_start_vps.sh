@@ -94,7 +94,7 @@ systemctl enable fail2ban
 systemctl start fail2ban
 
 # --- 🛠 Смена Hostname на localhost---
-cp /etc/hosts /etc/hosts.backup.$(date +%d%m%Y)"
+cp /etc/hosts /etc/hosts.backup.$(date +%d%m%Y)
 hostnamectl set-hostname localhost
 tee /etc/hosts > /dev/null <<EOF
 127.0.0.1   localhost
