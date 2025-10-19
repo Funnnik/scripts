@@ -4,7 +4,7 @@
 # Автор: Funnnik
 # Назначение: Автоматическая настройка нового VPS
 # Совместимость: Ubuntu 22.04 / 24.04+
-# Версия: 1.1
+# Версия: 1.2
 # ==============================================================
 
 set -e
@@ -36,21 +36,15 @@ ufw default allow outgoing
 ufw allow from 62.105.44.145/29 to any port 22
 ufw allow from 188.0.160.0/19 to any port 22
 
-# Разрешаем пинг (ICMP) только с этих же подсетей
-echo "⚙️ Настраиваем ICMP (ping) через before.rules..."
+echo "⚙️ Настраиваем ICMP (ping) ограничения..."
 UFW_RULES="/etc/ufw/before.rules"
-if ! grep -q "ufw-before-input" "$UFW_RULES"; then
-  echo "Файл before.rules отсутствует — пропускаем настройку ICMP."
-else
-  # Добавим правила, если их нет
-  grep -q "icmp --icmp-type echo-request" "$UFW_RULES" || cat <<EOF >> "$UFW_RULES"
-
-# --- Custom ICMP rules (added by setup script) ---
--A ufw-before-input -p icmp --icmp-type echo-request -s 62.105.44.145/29 -j ACCEPT
--A ufw-before-input -p icmp --icmp-type echo-request -s 188.0.160.0/19 -j ACCEPT
--A ufw-before-input -p icmp --icmp-type echo-request -j DROP
-# --- End custom ICMP rules ---
-EOF
+if ! grep -q "Custom ICMP filtering" "$UFW_RULES"; then
+  sed -i '/# ok icmp codes for INPUT/a \
+-A ufw-before-input -p icmp --icmp-type echo-request -s 62.105.44.145/29 -j ACCEPT\n\
+-A ufw-before-input -p icmp --icmp-type echo-request -s 188.0.160.0/19 -j ACCEPT\n\
+-A ufw-before-input -p icmp --icmp-type echo-request -j DROP\n\
+# --- End custom ICMP filtering ---' "$UFW_RULES"
+  ufw reload
 fi
 
 ufw logging on
