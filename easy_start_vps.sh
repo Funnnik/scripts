@@ -67,13 +67,18 @@ systemctl restart systemd-resolved
 systemctl enable systemd-resolved
 
 # --- Установка Docker ---
-echo "🐳 Устанавливаем Docker..."
-curl -fsSL https://get.docker.com | sh
-usermod -aG docker $SUDO_USER || true
+if ! command -v docker &> /dev/null; then
+  echo "🐳 Устанавливаем Docker..."
+  curl -fsSL https://get.docker.com | sh
+  usermod -aG docker $SUDO_USER || true
+else
+  echo "✅ Docker уже установлен, пропускаем установку."
+  docker --version
+fi
 
 # --- Сетевые оптимизации и BBR ---
 echo "⚡ Применяем оптимизацию сети (VPN tuning)..."
-sudo tee /etc/sysctl.d/99-vpn-tuning.conf <<'EOF'
+tee /etc/sysctl.d/99-vpn-tuning.conf <<'EOF'
 net.ipv4.ip_forward = 1
 net.ipv6.conf.all.forwarding = 1
 net.ipv4.tcp_congestion_control = bbr
@@ -85,7 +90,7 @@ net.ipv4.tcp_wmem = 4096 65536 2500000
 net.ipv4.tcp_fastopen = 3
 EOF
 
-sudo sysctl --system
+sysctl --system
 
 # --- Установка Fail2Ban ---
 echo "🔐 Устанавливаем и настраиваем Fail2Ban..."
@@ -93,8 +98,8 @@ apt install -y fail2ban
 systemctl enable fail2ban
 systemctl start fail2ban
 
-# --- Смена Hostname на localhost---
-echo "🛠 Меняем имя на localhost"
+# --- Смена Hostname на localhost ---
+echo "⚙️ Меняем имя на localhost..."
 cp /etc/hosts /etc/hosts.backup
 hostnamectl set-hostname localhost
 tee /etc/hosts > /dev/null <<EOF
@@ -102,9 +107,9 @@ tee /etc/hosts > /dev/null <<EOF
 127.0.1.1   localhost
 EOF
 
-echo "Готово! Hostname: $(hostname)"
-echo "Проверь PTR!"
-echo "Бэкап: /etc/hosts.backup"
+echo "✅ Готово! Hostname: $(hostname)"
+echo "⚠️ Проверь PTR!"
+echo "⚠️ Бэкап: /etc/hosts.backup"
 
 # --- Финал ---
 echo ""
@@ -116,11 +121,11 @@ read -r -p "🔁 Выполнить перезагрузку сейчас? [y/N]
 
 case "$REBOOT_ANSWER" in
     [yY][eE][sS]|[yY])
-        echo "Перезагружаюсь..."
+        echo "🔁 Перезагружаюсь..."
         sleep 2
         reboot
         ;;
     *)
-        echo "Перезагрузка пропущена."
+        echo "⚠️ Перезагрузка пропущена."
         ;;
 esac
