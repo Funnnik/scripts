@@ -24,8 +24,9 @@ sleep 3
 
 echo "📦 Обновляем систему..."
 apt update && apt upgrade -y
-apt install -y curl ufw fail2ban nano htop
+apt install -y curl ufw fail2ban htop
 snap install speedtest
+
 # --- Настройка UFW ---
 echo "🧱 Настраиваем UFW (фаервол)..."
 ufw --force reset
@@ -36,15 +37,18 @@ ufw default allow outgoing
 ufw allow from 62.105.44.145/29 to any port 22
 ufw allow from 188.0.160.0/19 to any port 22
 
+# --- Настройка ICMP (ping) ---
 echo "⚙️ Настраиваем ICMP (ping) ограничения..."
 UFW_RULES="/etc/ufw/before.rules"
-if ! grep -q "Custom ICMP filtering" "$UFW_RULES"; then
-  sed -i '/# ok icmp codes for INPUT/a \
+if grep -q "# ok icmp codes for INPUT" "$UFW_RULES"; then
+  if ! grep -q "Custom ICMP filtering" "$UFW_RULES"; then
+    sed -i '/# ok icmp codes for INPUT/a \
+# --- Custom ICMP filtering ---\n\
 -A ufw-before-input -p icmp --icmp-type echo-request -s 62.105.44.145/29 -j ACCEPT\n\
 -A ufw-before-input -p icmp --icmp-type echo-request -s 188.0.160.0/19 -j ACCEPT\n\
 -A ufw-before-input -p icmp --icmp-type echo-request -j DROP\n\
 # --- End custom ICMP filtering ---' "$UFW_RULES"
-  ufw reload
+  fi
 fi
 
 ufw logging on
@@ -68,18 +72,21 @@ echo "🐳 Устанавливаем Docker..."
 curl -fsSL https://get.docker.com | sh
 usermod -aG docker $SUDO_USER || true
 
-# --- Включение TCP BBR ---
-echo "⚡ Включаем TCP BBR..."
-SYSCTL_CONF="/etc/sysctl.conf"
-if ! grep -q "tcp_congestion_control=bbr" "$SYSCTL_CONF"; then
-  cat <<EOF >> "$SYSCTL_CONF"
-
-# Enable BBR congestion control
-net.core.default_qdisc=fq
-net.ipv4.tcp_congestion_control=bbr
+# --- Сетевые оптимизации и BBR ---
+echo "⚡ Применяем оптимизацию сети (VPN tuning)..."
+sudo tee /etc/sysctl.d/99-vpn-tuning.conf <<'EOF'
+net.ipv4.ip_forward = 1
+net.ipv6.conf.all.forwarding = 1
+net.ipv4.tcp_congestion_control = bbr
+net.core.default_qdisc = fq
+net.core.rmem_max = 2500000
+net.core.wmem_max = 2500000
+net.ipv4.tcp_rmem = 4096 87380 2500000
+net.ipv4.tcp_wmem = 4096 65536 2500000
+net.ipv4.tcp_fastopen = 3
 EOF
-fi
-sysctl -p
+
+sudo sysctl --system
 
 # --- Установка Fail2Ban ---
 echo "🔐 Устанавливаем и настраиваем Fail2Ban..."
@@ -91,4 +98,3 @@ systemctl start fail2ban
 echo ""
 echo "✅ Настройка завершена успешно!"
 echo "Рекомендуется выполнить: sudo reboot"
-echo "После перезагрузки Docker будет доступен без sudo."
