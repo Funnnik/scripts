@@ -35,8 +35,8 @@ ufw default deny incoming
 ufw default allow outgoing
 
 # Разрешаем SSH только с доверенных подсетей
-ufw allow from 62.105.44.145/29 to any port 22
-ufw allow from 188.0.160.0/19 to any port 22
+ufw allow from 62.105.44.145/29 to any port ssh
+ufw allow from 188.0.160.0/19 to any port ssh
 
 # --- Настройка ICMP (ping) ---
 echo "⚙️ Настраиваем ICMP (ping) ограничения..."
