@@ -1,8 +1,6 @@
 #!/bin/bash
 # ==============================================================
-# VPS Initial Setup Script
 # Автор: Funnnik
-# Назначение: Автоматическая настройка нового VPS
 # Совместимость: Ubuntu 22.04 / 24.04+
 # Версия: 1.2
 # ==============================================================
@@ -96,7 +94,7 @@ systemctl enable fail2ban
 systemctl start fail2ban
 
 # --- 🛠 Смена Hostname на localhost---
-cp /etc/hosts /etc/hosts.backup
+cp /etc/hosts /etc/hosts.backup.$(date +%d%m%Y)"
 hostnamectl set-hostname localhost
 tee /etc/hosts > /dev/null <<EOF
 127.0.0.1   localhost
