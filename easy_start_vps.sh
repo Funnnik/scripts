@@ -103,7 +103,7 @@ EOF
 
 echo "Готово! Hostname: $(hostname)"
 echo "Проверь PTR!"
-echo "Бэкап: /etc/hosts.backup"
+echo "Бэкап: /etc/hosts.backup.$(date +%d%m%Y)"
 
 # --- Финал ---
 echo ""
