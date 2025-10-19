@@ -25,7 +25,7 @@ sleep 3
 echo "📦 Обновляем систему..."
 apt update && apt upgrade -y
 apt install -y curl ufw fail2ban nano htop
-
+snap install speedtest
 # --- Настройка UFW ---
 echo "🧱 Настраиваем UFW (фаервол)..."
 ufw --force reset
