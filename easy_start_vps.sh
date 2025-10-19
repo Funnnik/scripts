@@ -99,7 +99,7 @@ systemctl enable fail2ban
 systemctl start fail2ban
 
 # --- Смена Hostname на localhost ---
-echo "⚙️ Меняем имя на localhost..."
+echo "⚙️  Меняем имя на localhost..."
 cp /etc/hosts /etc/hosts.backup
 hostnamectl set-hostname localhost
 tee /etc/hosts > /dev/null <<EOF
@@ -108,8 +108,8 @@ tee /etc/hosts > /dev/null <<EOF
 EOF
 
 echo "✅ Готово! Hostname: $(hostname)"
-echo "⚠️ Проверь PTR!"
-echo "⚠️ Бэкап: /etc/hosts.backup"
+echo "⚠️  Проверь PTR!"
+echo "⚠️  Бэкап: /etc/hosts.backup"
 
 # --- Финал ---
 echo ""
