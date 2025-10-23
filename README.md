@@ -4,4 +4,4 @@ bash <(curl -fsSL https://raw.githubusercontent.com/Funnnik/scripts/refs/heads/m
 
 # setup update list.sh for keenetic
 
-bash <(curl -fsSL https://raw.githubusercontent.com/Funnnik/scripts/refs/heads/main/setup_update_list.sh)
+curl -fsSL https://raw.githubusercontent.com/Funnnik/scripts/refs/heads/main/setup_update_list.sh | sh
