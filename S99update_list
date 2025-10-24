@@ -8,26 +8,69 @@
 # Short-Description: Update list script
 ### END INIT INFO
 
-start() {
-    echo "Ждём 3 минуты перед запуском update_list.sh..."
-    (sleep 180; /opt/bin/update_list.sh) &
+SCHED_PID_FILE="/opt/var/update_list_scheduler.pid"
+LOCK_FILE="/opt/var/update_list.lock"
+LOG="/opt/var/log/update_list.log"
 
-    echo "Запуск фонового процесса для выполнения update_list.sh в 3:00 ночи..."
+start() {
+    echo "Запуск планировщика update_list..."
+
+    # Не стартуем, если уже запущено
+    if [ -f "$SCHED_PID_FILE" ]; then
+        if kill -0 $(cat "$SCHED_PID_FILE") 2>/dev/null; then
+            echo "Планировщик уже запущен (pid $(cat $SCHED_PID_FILE))."
+            return 0
+        else
+            # stale pid file
+            rm -f "$SCHED_PID_FILE"
+        fi
+    fi
+
+    # Запускаем фоновый шедулер как отдельный процесс.
     (
+        # --- Запуск через 3 минуты после старта роутера ---
+        sleep 180
+        if [ ! -f "$LOCK_FILE" ]; then
+            echo "$(date '+%F %T') [SCHED] Выполняю отложенный запуск (после старта)" >> "$LOG"
+            (sh /opt/bin/update_list.sh >> "$LOG" 2>&1 </dev/null &)
+        else
+            echo "$(date '+%F %T') [SCHED] Отложенный запуск пропущен: есть lock." >> "$LOG"
+        fi
+
+        # --- Ежедневный цикл: проверка времени каждую минуту ---
         while true; do
             CURRENT_TIME=$(date +%H:%M)
             if [ "$CURRENT_TIME" = "03:00" ]; then
-                /opt/bin/update_list.sh
-                sleep 86400  # Спим 24 часа (чтобы не запускаться повторно в этот день)
+                if [ ! -f "$LOCK_FILE" ]; then
+                    echo "$(date '+%F %T') [SCHED] Время 03:00 — запускаю update_list.sh" >> "$LOG"
+                    (sh /opt/bin/update_list.sh >> "$LOG" 2>&1 </dev/null &)
+                else
+                    echo "$(date '+%F %T') [SCHED] 03:00 — пропускаю запуск: есть lock." >> "$LOG"
+                fi
+                sleep 86400  # спим 24 часа после запуска
             fi
-            sleep 60  # Проверяем время каждую минуту
+            sleep 60
         done
     ) &
+    echo $! > "$SCHED_PID_FILE"
+    echo "Планировщик запущен с PID $(cat $SCHED_PID_FILE)."
 }
 
 stop() {
-    echo "Остановка update_list.sh..."
-    killall update_list.sh
+    echo "Остановка планировщика update_list..."
+    if [ -f "$SCHED_PID_FILE" ]; then
+        PID=$(cat "$SCHED_PID_FILE")
+        kill "$PID" 2>/dev/null || true
+        rm -f "$SCHED_PID_FILE"
+        echo "Планировщик (pid $PID) остановлен."
+    else
+        echo "Планировщик не запущен."
+    fi
+
+    # Убиваем оставшиеся рабочие процессы update_list.sh, если есть
+    killall update_list.sh 2>/dev/null || true
+    # Удаляем lock (чтобы он не блокировал дальнейшие запуски)
+    rm -f "$LOCK_FILE"
 }
 
 restart() {
