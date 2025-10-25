@@ -76,33 +76,6 @@ else
   docker --version
 fi
 
-echo "🐳 Настраиваем Docker на работу без прямого доступа к iptables..."
-
-# Создаём конфиг, если его ещё нет
-sudo mkdir -p /etc/docker
-
-# Добавляем или обновляем параметр iptables=false
-if [ -f /etc/docker/daemon.json ]; then
-    if grep -q '"iptables"' /etc/docker/daemon.json; then
-        # Если параметр уже есть — заменяем его
-        sudo sed -i 's/"iptables": *[^,}]*,*/"iptables": false,/' /etc/docker/daemon.json
-    else
-        # Если параметра нет — добавляем его перед последней скобкой
-        sudo sed -i 's/}$/,"iptables": false}/' /etc/docker/daemon.json
-    fi
-else
-    # Создаём новый файл, если его не существует
-    cat <<'EOF' | sudo tee /etc/docker/daemon.json >/dev/null
-{
-  "iptables": false
-}
-EOF
-fi
-
-# Перезапускаем Docker для применения изменений
-sudo systemctl restart docker
-echo "✅ Docker настроен — теперь UFW полностью контролирует сетевой доступ к контейнерам."
-
 # --- Сетевые оптимизации и BBR ---
 echo "⚡ Применяем оптимизацию сети (VPN tuning)..."
 tee /etc/sysctl.d/99-vpn-tuning.conf <<'EOF'
