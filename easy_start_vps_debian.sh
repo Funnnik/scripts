@@ -119,6 +119,45 @@ EOF
 systemctl daemon-reload
 systemctl enable restore-iptables
 
+# === Настройка Fail2Ban ===
+echo "🛡️ Устанавливаем Fail2Ban..."
+apt install -y fail2ban
+
+# 🔐 Защита SSH
+cat <<'EOF' >/etc/fail2ban/jail.d/ssh.local
+[sshd]
+enabled = true
+port = ssh
+filter = sshd
+logpath = /var/log/auth.log
+maxretry = 5
+findtime = 10m
+bantime = 1h
+EOF
+
+# 🔐 Защита веб-интерфейса Amnezia WG Easy
+cat <<'EOF' >/etc/fail2ban/filter.d/amnezia.conf
+[Definition]
+failregex = ^<HOST> - .*"(GET|POST).*HTTP.*" 401
+ignoreregex =
+EOF
+
+cat <<'EOF' >/etc/fail2ban/jail.d/amnezia.conf
+[amnezia]
+enabled = true
+port = 37238
+protocol = tcp
+filter = amnezia
+logpath = /var/lib/docker/containers/*/*.log
+maxretry = 5
+findtime = 10m
+bantime = 1h
+action = ufw[name=Amnezia, port=37238, protocol=tcp]
+EOF
+
+systemctl enable fail2ban
+systemctl restart fail2ban
+
 # --- Проверка ---
 echo "✅ Настройка завершена!"
 echo "🔁 Рекомендуется перезагрузить сервер для применения всех параметров."
