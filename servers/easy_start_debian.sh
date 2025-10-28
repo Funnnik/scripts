@@ -27,10 +27,27 @@ nft_flush_and_enable() {
   systemctl start nftables || true
 }  # [web:24]
 
-append_unique_line() {
-  local file="$1"; shift
-  local line="$*"
-  grep -qxF "$line" "$file" 2>/dev/null || echo "$line" >>"$file"
+# Сбор сетов IPv4 из массива
+join_trusted_v4() {
+  local IFS=', '
+  echo "${TRUSTED_NETS[*]}"
+}  # [web:24]
+
+# Идempotентное добавление строки правила в chain input файла nftables
+ensure_rule_in_file() {
+  local port="$1"
+  if ! grep -qE "ip saddr @trusted_v4 tcp dport ${port} accept" "$NFT_CONF"; then
+    # Вставим правило после established/related
+    awk -v p="${port}" '
+      BEGIN{added=0}
+      {print}
+      /ct state established,related accept/ && added==0 {
+        print "    # Web-интерфейс контейнера из доверенных сетей"
+        print "    ip saddr @trusted_v4 tcp dport " p " accept"
+        added=1
+      }
+    ' "$NFT_CONF" > "${NFT_CONF}.tmp" && mv "${NFT_CONF}.tmp" "$NFT_CONF"
+  fi
 }  # [web:24]
 
 # ===== 1. Обновление системы =====
@@ -52,17 +69,11 @@ fi
 ensure_pkg nftables  # [web:24]
 nft_flush_and_enable  # [web:24]
 
-# Собираем элементы доверенных сетей для nftables
-TRUSTED_SET_V4=""
-for net in "${TRUSTED_NETS[@]}"; do
-  TRUSTED_SET_V4+="$net, "
-done
-TRUSTED_SET_V4="${TRUSTED_SET_V4%, }"
+TRUSTED_SET_V4="$(join_trusted_v4)"
 
-# Генерация конфигурации nftables (таблица inet, policy drop)
+# Полностью генерируем валидный конфиг (таблица inet filter и три цепочки)
 cat > "$NFT_CONF" <<EOF
 #!/usr/sbin/nft -f
-
 flush ruleset
 
 table inet filter {
@@ -81,9 +92,11 @@ table inet filter {
     # SSH только из доверенных сетей (IPv4)
     ip saddr @trusted_v4 tcp dport ${SSH_PORT} accept
 
-    # ICMP/ICMPv6: разрешить только из доверенных (echo-request)
+    # ICMP echo-request только из доверенных (IPv4)
     ip saddr @trusted_v4 ip protocol icmp icmp type echo-request accept
-    ip6 saddr ::1 ip6 nexthdr icmpv6 icmpv6 type echo-request accept
+
+    # Разрешить некоторые служебные ICMP для корректности работы сети при необходимости
+    # (по умолчанию policy drop, можно добавить точечно по типам)
   }
 
   chain forward {
@@ -96,13 +109,18 @@ table inet filter {
 }
 EOF
 
-# Применяем правила
-nft -f "$NFT_CONF"  # [web:24]
-systemctl restart nftables  # [web:24]
+# Применить конфиг и проверить синтаксис
+if nft --check -f "$NFT_CONF"; then
+  nft -f "$NFT_CONF"  # [web:24]
+  systemctl restart nftables  # [web:24]
+else
+  echo "Ошибка синтаксиса в $NFT_CONF" >&2
+  exit 1
+fi
 
 # ===== 6. DNS-over-HTTPS с cloudflared (Cloudflare+Google) =====
 
-# 6.0 Добавляем официальный репозиторий Cloudflare (bookworm) перед установкой
+# 6.0 Официальный репозиторий Cloudflare (bookworm)
 if ! apt-cache policy | grep -q "pkg.cloudflare.com.*cloudflared"; then
   install -d -m 0755 /usr/share/keyrings  # [web:132]
   curl -fsSL https://pkg.cloudflare.com/cloudflare-main.gpg | tee /usr/share/keyrings/cloudflare-main.gpg >/dev/null  # [web:132]
@@ -121,7 +139,6 @@ cat > /etc/cloudflared/config.yml <<EOF
 proxy-dns: true
 proxy-dns-address: ${DNS_STUB_LISTEN}
 proxy-dns-port: ${CLOUDFLARED_PORT}
-# Апстримы DoH: Cloudflare и Google
 upstream:
   - https://cloudflare-dns.com/dns-query
   - https://dns.google/dns-query
@@ -280,8 +297,13 @@ if [[ "${USE_AWG,,}" == "да" || "${USE_AWG,,}" == "yes" ]]; then
     fi
   done
 
-  # Добавим правило для WEB_PORT в nftables (только доверенные сети)
-  nft add rule inet filter input ip saddr @trusted_v4 tcp dport ${WEB_PORT} accept  # [web:24]
+  # Вставим правило в файл (идемпотентно) и в рантайм, затем перезагрузим nftables
+  ensure_rule_in_file "${WEB_PORT}"  # [web:24]
+  nft add rule inet filter input ip saddr @trusted_v4 tcp dport ${WEB_PORT} accept || true  # [web:24]
+  if nft --check -f "$NFT_CONF"; then
+    nft -f "$NFT_CONF"  # [web:24]
+    systemctl restart nftables  # [web:24]
+  fi
 
   # Порт UDP для AmneziaWG, открыть для всех
   while true; do
@@ -293,6 +315,20 @@ if [[ "${USE_AWG,,}" == "да" || "${USE_AWG,,}" == "yes" ]]; then
     fi
   done
   nft add rule inet filter input udp dport ${WG_UDP} accept  # [web:24]
+  # Также добавим в файл правило для сохранения
+  if ! grep -qE "udp dport ${WG_UDP} accept" "$NFT_CONF"; then
+    awk -v p="${WG_UDP}" '
+      BEGIN{added=0}
+      {print}
+      /ct state established,related accept/ && added==0 {
+        print "    # UDP порт AmneziaWG открыт для всех"
+        print "    udp dport " p " accept"
+        added=1
+      }
+    ' "$NFT_CONF" > "${NFT_CONF}.tmp" && mv "${NFT_CONF}.tmp" "$NFT_CONF"
+    nft -f "$NFT_CONF"  # [web:24]
+    systemctl restart nftables  # [web:24]
+  fi
 
   cat <<EOF
 
