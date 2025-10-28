@@ -102,11 +102,11 @@ systemctl restart nftables  # [web:24]
 
 # ===== 6. DNS-over-HTTPS с cloudflared (Cloudflare+Google) =====
 
-# 6.0 Добавляем официальный репозиторий Cloudflare перед установкой
+# 6.0 Добавляем официальный репозиторий Cloudflare (bookworm) перед установкой
 if ! apt-cache policy | grep -q "pkg.cloudflare.com.*cloudflared"; then
   install -d -m 0755 /usr/share/keyrings  # [web:132]
   curl -fsSL https://pkg.cloudflare.com/cloudflare-main.gpg | tee /usr/share/keyrings/cloudflare-main.gpg >/dev/null  # [web:132]
-  echo 'deb [signed-by=/usr/share/keyrings/cloudflare-main.gpg] https://pkg.cloudflare.com/cloudflared any main' > /etc/apt/sources.list.d/cloudflared.list  # [web:132]
+  echo 'deb [signed-by=/usr/share/keyrings/cloudflare-main.gpg] https://pkg.cloudflare.com/cloudflared bookworm main' > /etc/apt/sources.list.d/cloudflared.list  # [web:132]
   apt-get update -y  # [web:132]
 fi
 
