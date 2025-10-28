@@ -4,7 +4,7 @@ bash <(curl -fsSL https://raw.githubusercontent.com/Funnnik/scripts/refs/heads/m
 
 # easy start debian vps 
 
-bash <(curl -fsSL https://raw.githubusercontent.com/Funnnik/scripts/refs/heads/main/servers/easy_start_debian.sh)
+apt update && apt install curl -y && bash <(curl -fsSL https://raw.githubusercontent.com/Funnnik/scripts/refs/heads/main/servers/easy_start_debian.sh)
 
 # setup update list.sh for keenetic
 
