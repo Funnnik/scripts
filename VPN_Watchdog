@@ -1,0 +1,77 @@
+#!/bin/sh
+# Автоустановщик Watchdog-VPN для роутеров OpenWrt (Podkop)
+
+echo "======================================================="
+echo " Начинаем установку VPN Watchdog (Авто-возврат интернета)"
+echo "======================================================="
+
+echo "[1/6] Создание скрипта /etc/watchdog-vpn.sh..."
+cat << 'EOF' > /etc/watchdog-vpn.sh
+#!/bin/sh
+
+FLAG_FILE="/tmp/vpn_down_by_watchdog"
+
+kill_vpn() {
+    logger -t VPN-Watchdog "VPN недоступен. Спасаем интернет (отключаем Podkop)."
+    /etc/init.d/podkop stop
+    uci del dhcp.@dnsmasq[0].server >/dev/null 2>&1
+    uci set dhcp.@dnsmasq[0].noresolv='0'
+    uci commit dhcp
+    /etc/init.d/dnsmasq restart
+    date +%s > "$FLAG_FILE"
+}
+
+if /etc/init.d/podkop status | grep -q "running"; then
+    if ! nslookup ya.ru 127.0.0.1 >/dev/null 2>&1; then
+        if ping -c 2 -W 2 8.8.8.8 >/dev/null 2>&1; then
+            kill_vpn
+        fi
+    fi
+else
+    if [ -f "$FLAG_FILE" ]; then
+        LAST_KILL=$(cat "$FLAG_FILE")
+        NOW=$(date +%s)
+        if [ $((NOW - LAST_KILL)) -gt 300 ]; then
+            logger -t VPN-Watchdog "5 минут прошло. Пробуем восстановить туннель..."
+            /etc/init.d/podkop start
+            sleep 25
+            if nslookup ya.ru 127.0.0.1 >/dev/null 2>&1; then
+                logger -t VPN-Watchdog "VPN успешно восстановлен."
+                rm "$FLAG_FILE"
+            else
+                logger -t VPN-Watchdog "Сервер все еще недоступен. Отключаем обратно."
+                kill_vpn
+            fi
+        fi
+    fi
+fi
+EOF
+
+echo "[2/6] Выдача прав на выполнение..."
+chmod +x /etc/watchdog-vpn.sh
+
+echo "[3/6] Настройка автоматического возврата DNS в Podkop..."
+if uci show podkop >/dev/null 2>&1; then
+    uci set podkop.settings.shutdown_correctly='1'
+    uci commit podkop
+else
+    echo "Внимание: Podkop не установлен или конфиг не найден!"
+fi
+
+echo "[4/6] Регистрация в планировщике задач (cron)..."
+touch /etc/crontabs/root
+sed -i '/watchdog-vpn.sh/d' /etc/crontabs/root
+echo "*/3 * * * * /etc/watchdog-vpn.sh" >> /etc/crontabs/root
+/etc/init.d/cron restart
+
+echo "[5/6] Добавление в список резервных копий (sysupgrade.conf)..."
+if ! grep -q "/etc/watchdog-vpn.sh" /etc/sysupgrade.conf; then
+    echo "/etc/watchdog-vpn.sh" >> /etc/sysupgrade.conf
+fi
+
+echo "[6/6] Сохранение изменений в энергонезависимую память..."
+sync
+
+echo "======================================================="
+echo " Готово! Watchdog успешно установлен и работает."
+echo "======================================================="
