@@ -7,6 +7,6 @@ bash <(curl -fsSL https://raw.githubusercontent.com/Funnnik/scripts/refs/heads/m
 curl -fsSL https://raw.githubusercontent.com/Funnnik/scripts/refs/heads/main/setup_update_list.sh | sh
 \```
 # install VPN_Watchdog
-\```bash
+```bash
 wget -O - https://raw.githubusercontent.com/Funnnik/scripts/refs/heads/main/VPN_Watchdog | sh
-\```
+```
