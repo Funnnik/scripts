@@ -1,13 +1,19 @@
 #!/bin/sh
-# Автоустановщик Watchdog-VPN v4 (Бесшовный возврат интернета)
+# Автоустановщик Watchdog-VPN v5 (SOCKS5 + Curl Probe)
 
-echo "Установка Умного Watchdog v4..."
+echo "Установка Умного Watchdog v5..."
 
 cat << 'EOF' > /etc/watchdog-vpn.sh
 #!/bin/sh
 
 FLAG_FILE="/tmp/vpn_down_by_watchdog"
 STALL_FLAG="/tmp/vpn_stalled_once"
+
+# Убеждаемся, что установлена профессиональная утилита curl
+if ! command -v curl >/dev/null 2>&1; then
+    logger -t VPN-Watchdog "Установка curl для точных проверок..."
+    apk add curl >/dev/null 2>&1 || opkg install curl >/dev/null 2>&1
+fi
 
 kill_vpn() {
     logger -t VPN-Watchdog "VPN заблокирован! Возвращаем обычный интернет."
@@ -17,7 +23,7 @@ kill_vpn() {
     uci commit dhcp
     /etc/init.d/dnsmasq restart
     
-    # МАГИЯ: Жестко отбиваем запросы к старым Fake-IP, чтобы телефоны мгновенно сбрасывали кэш
+    # Сбрасываем кэш на устройствах
     ip route add unreachable 198.18.0.0/15 >/dev/null 2>&1
     
     date +%s > "$FLAG_FILE"
@@ -25,26 +31,22 @@ kill_vpn() {
 }
 
 check_tunnel() {
-    # Генерируем случайный домен для полного обхода кэша (напр. chk-a1b2c3d4.com)
-    RND=$(cat /proc/sys/kernel/random/uuid | cut -c 1-8)
-    DNS_CHECK=$(nslookup "chk-${RND}.com" 127.0.0.42 2>&1)
+    # Жестко пускаем трафик через SOCKS5 порт туннеля (никаких обходов!)
+    HTTP_CODE=$(curl -s -m 5 -o /dev/null -w "%{http_code}" -x socks5h://127.0.0.1:4534 http://www.gstatic.com/generate_204)
     
-    # Если Google DNS через VPN ответил, что домена нет (NXDOMAIN) - трафик ходит успешно!
-    if echo "$DNS_CHECK" | grep -qiE "NXDOMAIN|NameError"; then
-        return 0
+    if [ "$HTTP_CODE" = "204" ]; then
+        return 0 # Успех, трафик прошел через VPN
     else
-        return 1
+        return 1 # Провал (сервер недоступен)
     fi
 }
 
 # --- ОСНОВНАЯ ЛОГИКА ---
 if pidof sing-box >/dev/null; then
     if check_tunnel; then
-        # Туннель жив. На всякий случай снимаем блокировку ложных IP, если она осталась
         ip route del unreachable 198.18.0.0/15 >/dev/null 2>&1
         rm -f "$STALL_FLAG"
     else
-        # Трафик не идет. Проверяем прямой интернет
         if ping -c 2 -W 2 8.8.8.8 >/dev/null 2>&1; then
             if [ -f "$STALL_FLAG" ]; then
                 kill_vpn
@@ -61,10 +63,7 @@ else
         NOW=$(date +%s)
         if [ $((NOW - LAST_KILL)) -gt 300 ]; then
             logger -t VPN-Watchdog "5 минут прошло. Пробуем восстановить туннель..."
-            
-            # Снимаем блокировку Fake-IP перед запуском
             ip route del unreachable 198.18.0.0/15 >/dev/null 2>&1
-            
             /etc/init.d/podkop start
             sleep 25
             
@@ -97,4 +96,4 @@ if ! grep -q "/etc/watchdog-vpn.sh" /etc/sysupgrade.conf; then
 fi
 
 sync
-echo "Готово! Умный Watchdog v4 установлен."
+echo "Готово! Умный Watchdog v5 установлен."
