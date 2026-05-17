@@ -1,19 +1,16 @@
 #!/bin/sh
-# Автоустановщик Watchdog-VPN v5 (SOCKS5 + Curl Probe)
-
-echo "Установка Умного Watchdog v5..."
+# Автоустановщик Watchdog-VPN v6 (Анти-флуд + Тайминги)
 
 cat << 'EOF' > /etc/watchdog-vpn.sh
 #!/bin/sh
 
 FLAG_FILE="/tmp/vpn_down_by_watchdog"
 STALL_FLAG="/tmp/vpn_stalled_once"
+LOCK_FILE="/tmp/watchdog_running.lock"
 
-# Убеждаемся, что установлена профессиональная утилита curl
-if ! command -v curl >/dev/null 2>&1; then
-    logger -t VPN-Watchdog "Установка curl для точных проверок..."
-    apk add curl >/dev/null 2>&1 || opkg install curl >/dev/null 2>&1
-fi
+# Защита от дублирования (если скрипт завис, не запускаем второй)
+if [ -f "$LOCK_FILE" ]; then exit 0; fi
+touch "$LOCK_FILE"
 
 kill_vpn() {
     logger -t VPN-Watchdog "VPN заблокирован! Возвращаем обычный интернет."
@@ -22,26 +19,17 @@ kill_vpn() {
     uci set dhcp.@dnsmasq[0].noresolv='0'
     uci commit dhcp
     /etc/init.d/dnsmasq restart
-    
-    # Сбрасываем кэш на устройствах
     ip route add unreachable 198.18.0.0/15 >/dev/null 2>&1
-    
     date +%s > "$FLAG_FILE"
     rm -f "$STALL_FLAG"
 }
 
 check_tunnel() {
-    # Жестко пускаем трафик через SOCKS5 порт туннеля (никаких обходов!)
-    HTTP_CODE=$(curl -s -m 5 -o /dev/null -w "%{http_code}" -x socks5h://127.0.0.1:4534 http://www.gstatic.com/generate_204)
-    
-    if [ "$HTTP_CODE" = "204" ]; then
-        return 0 # Успех, трафик прошел через VPN
-    else
-        return 1 # Провал (сервер недоступен)
-    fi
+    # Увеличили таймаут curl до 10 секунд, чтобы дать списку загрузиться
+    HTTP_CODE=$(curl -s -m 10 -o /dev/null -w "%{http_code}" -x socks5h://127.0.0.1:4534 http://www.gstatic.com/generate_204)
+    [ "$HTTP_CODE" = "204" ] && return 0 || return 1
 }
 
-# --- ОСНОВНАЯ ЛОГИКА ---
 if pidof sing-box >/dev/null; then
     if check_tunnel; then
         ip route del unreachable 198.18.0.0/15 >/dev/null 2>&1
@@ -51,9 +39,10 @@ if pidof sing-box >/dev/null; then
             if [ -f "$STALL_FLAG" ]; then
                 kill_vpn
             else
-                logger -t VPN-Watchdog "Туннель завис. Делаем быстрый рестарт..."
+                logger -t VPN-Watchdog "Туннель завис. Рестарт Podkop (ждем 40 сек)..."
                 /etc/init.d/podkop restart
                 touch "$STALL_FLAG"
+                sleep 40 # Даем списку обхода время на загрузку
             fi
         fi
     fi
@@ -62,38 +51,22 @@ else
         LAST_KILL=$(cat "$FLAG_FILE")
         NOW=$(date +%s)
         if [ $((NOW - LAST_KILL)) -gt 300 ]; then
-            logger -t VPN-Watchdog "5 минут прошло. Пробуем восстановить туннель..."
+            logger -t VPN-Watchdog "Пробуем восстановить туннель..."
             ip route del unreachable 198.18.0.0/15 >/dev/null 2>&1
             /etc/init.d/podkop start
-            sleep 25
-            
+            sleep 40 
             if check_tunnel; then
-                logger -t VPN-Watchdog "VPN успешно восстановлен!"
-                rm -f "$FLAG_FILE"
-                rm -f "$STALL_FLAG"
+                logger -t VPN-Watchdog "VPN восстановлен!"
+                rm -f "$FLAG_FILE" "$STALL_FLAG"
             else
-                logger -t VPN-Watchdog "Сервер все еще заблокирован. Отключаем обратно."
                 kill_vpn
             fi
         fi
     fi
 fi
+
+rm -f "$LOCK_FILE"
 EOF
 
 chmod +x /etc/watchdog-vpn.sh
-
-if uci show podkop >/dev/null 2>&1; then
-    uci set podkop.settings.shutdown_correctly='1'
-    uci commit podkop
-fi
-
-sed -i '/watchdog-vpn.sh/d' /etc/crontabs/root
-echo "*/3 * * * * /etc/watchdog-vpn.sh" >> /etc/crontabs/root
-/etc/init.d/cron restart
-
-if ! grep -q "/etc/watchdog-vpn.sh" /etc/sysupgrade.conf; then
-    echo "/etc/watchdog-vpn.sh" >> /etc/sysupgrade.conf
-fi
-
 sync
-echo "Готово! Умный Watchdog v5 установлен."
