@@ -1,7 +1,7 @@
 #!/bin/sh
-# Автоустановщик Watchdog-VPN v2 (Умный рестарт + Проверка TCP)
+# Автоустановщик Watchdog-VPN v4 (Бесшовный возврат интернета)
 
-echo "Установка Умного Watchdog v2..."
+echo "Установка Умного Watchdog v4..."
 
 cat << 'EOF' > /etc/watchdog-vpn.sh
 #!/bin/sh
@@ -16,45 +16,64 @@ kill_vpn() {
     uci set dhcp.@dnsmasq[0].noresolv='0'
     uci commit dhcp
     /etc/init.d/dnsmasq restart
+    
+    # МАГИЯ: Жестко отбиваем запросы к старым Fake-IP, чтобы телефоны мгновенно сбрасывали кэш
+    ip route add unreachable 198.18.0.0/15 >/dev/null 2>&1
+    
     date +%s > "$FLAG_FILE"
+    rm -f "$STALL_FLAG"
 }
 
-# 1. Проверяем, жив ли процесс ядра
-if pgrep sing-box >/dev/null; then
-    # 2. Жесткая проверка: качаем данные прямо через туннель
-    if env http_proxy="http://127.0.0.1:4534" https_proxy="http://127.0.0.1:4534" wget -q -O /dev/null -T 5 http://ya.ru; then
-        # Трафик идет, всё отлично
+check_tunnel() {
+    # Генерируем случайный домен для полного обхода кэша (напр. chk-a1b2c3d4.com)
+    RND=$(cat /proc/sys/kernel/random/uuid | cut -c 1-8)
+    DNS_CHECK=$(nslookup "chk-${RND}.com" 127.0.0.42 2>&1)
+    
+    # Если Google DNS через VPN ответил, что домена нет (NXDOMAIN) - трафик ходит успешно!
+    if echo "$DNS_CHECK" | grep -qiE "NXDOMAIN|NameError"; then
+        return 0
+    else
+        return 1
+    fi
+}
+
+# --- ОСНОВНАЯ ЛОГИКА ---
+if pidof sing-box >/dev/null; then
+    if check_tunnel; then
+        # Туннель жив. На всякий случай снимаем блокировку ложных IP, если она осталась
+        ip route del unreachable 198.18.0.0/15 >/dev/null 2>&1
         rm -f "$STALL_FLAG"
     else
-        # Трафик не идет. Проверяем, есть ли вообще интернет от провайдера
+        # Трафик не идет. Проверяем прямой интернет
         if ping -c 2 -W 2 8.8.8.8 >/dev/null 2>&1; then
             if [ -f "$STALL_FLAG" ]; then
-                # Если уже пытались перезапускать, и не помогло - значит это жесткая блокировка
                 kill_vpn
-                rm -f "$STALL_FLAG"
             else
-                # Типичное "тихое зависание" VLESS. Делаем быстрый рестарт!
-                logger -t VPN-Watchdog "Туннель завис. Делаем быстрый рестарт Podkop..."
+                logger -t VPN-Watchdog "Туннель завис. Делаем быстрый рестарт..."
                 /etc/init.d/podkop restart
                 touch "$STALL_FLAG"
             fi
         fi
     fi
 else
-    # 3. Если VPN отключен нами, проверяем таймер на 5 минут
     if [ -f "$FLAG_FILE" ]; then
         LAST_KILL=$(cat "$FLAG_FILE")
         NOW=$(date +%s)
         if [ $((NOW - LAST_KILL)) -gt 300 ]; then
             logger -t VPN-Watchdog "5 минут прошло. Пробуем восстановить туннель..."
+            
+            # Снимаем блокировку Fake-IP перед запуском
+            ip route del unreachable 198.18.0.0/15 >/dev/null 2>&1
+            
             /etc/init.d/podkop start
             sleep 25
-            if env http_proxy="http://127.0.0.1:4534" https_proxy="http://127.0.0.1:4534" wget -q -O /dev/null -T 5 http://ya.ru; then
+            
+            if check_tunnel; then
                 logger -t VPN-Watchdog "VPN успешно восстановлен!"
                 rm -f "$FLAG_FILE"
                 rm -f "$STALL_FLAG"
             else
-                logger -t VPN-Watchdog "Сервер все еще заблокирован. Отключаем."
+                logger -t VPN-Watchdog "Сервер все еще заблокирован. Отключаем обратно."
                 kill_vpn
             fi
         fi
@@ -78,4 +97,4 @@ if ! grep -q "/etc/watchdog-vpn.sh" /etc/sysupgrade.conf; then
 fi
 
 sync
-echo "Готово! Watchdog v2 установлен и запущен."
+echo "Готово! Умный Watchdog v4 установлен."
