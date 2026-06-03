@@ -106,4 +106,4 @@ if ! grep -q "/etc/watchdog-vpn.sh" /etc/sysupgrade.conf; then
 fi
 
 sync
-echo "Готово! Умный Watchdog v7 установлен и полностью адаптирован."
+echo "Готово! Watchdog v7 установлен и полностью адаптирован."
