@@ -1,17 +1,18 @@
 #!/bin/sh
-# Автоустановщик Watchdog-VPN v7 (Адаптация под новые версии Podkop + Анти-флуд)
+# Автоустановщик Watchdog-VPN
 
-echo "Установка Watchdog v7..."
+# === НАСТРОЙКИ УСТАНОВЩИКА ===
+# При обновлении скрипта меняй версию только здесь:
+VERSION="v8"
+
+echo "Установка Watchdog $VERSION..."
 
 # 1. Настраиваем Podkop для идеальной совместимости с Watchdog
 if uci show podkop >/dev/null 2>&1; then
-    # Возвращаем DNS провайдера при остановке
     uci set podkop.settings.shutdown_correctly='1'
-    
-    # МАГИЯ: Принудительно открываем диагностический порт для curl (в новых версиях он закрыт)
+    # Принудительно открываем диагностический порт 4534
     uci set podkop.main.mixed_proxy_enabled='1'
     uci set podkop.main.mixed_proxy_port='4534'
-    
     uci commit podkop
 fi
 
@@ -19,41 +20,49 @@ fi
 cat << 'EOF' > /etc/watchdog-vpn.sh
 #!/bin/sh
 
+W_VER="VERSION_PLACEHOLDER"
 FLAG_FILE="/tmp/vpn_down_by_watchdog"
 STALL_FLAG="/tmp/vpn_stalled_once"
 LOCK_FILE="/tmp/watchdog_running.lock"
 
-# Защита от дублирования процессов
+# Защита от наложения процессов
 if [ -f "$LOCK_FILE" ]; then exit 0; fi
 touch "$LOCK_FILE"
 
-# Убеждаемся, что установлена профессиональная утилита curl
 if ! command -v curl >/dev/null 2>&1; then
-    logger -t VPN-Watchdog "Установка curl для точных проверок..."
+    logger -t "Watchdog[$W_VER]" "Установка curl для точных проверок..."
     apk add curl >/dev/null 2>&1 || opkg install curl >/dev/null 2>&1
 fi
 
 kill_vpn() {
-    logger -t VPN-Watchdog "VPN заблокирован! Возвращаем обычный интернет."
+    logger -t "Watchdog[$W_VER]" "🚨 VPN заблокирован! Возвращаем обычный интернет."
     /etc/init.d/podkop stop
     uci del dhcp.@dnsmasq[0].server >/dev/null 2>&1
     uci set dhcp.@dnsmasq[0].noresolv='0'
     uci commit dhcp
     /etc/init.d/dnsmasq restart
-    
-    # Сбрасываем кэш Fake-IP на устройствах Apple/Android
     ip route add unreachable 198.18.0.0/15 >/dev/null 2>&1
-    
     date +%s > "$FLAG_FILE"
     rm -f "$STALL_FLAG"
 }
 
 check_tunnel() {
-    # Стучимся строго в открытый нами диагностический порт 4534
-    HTTP_CODE=$(curl -s -m 10 -o /dev/null -w "%{http_code}" -x socks5h://127.0.0.1:4534 http://www.gstatic.com/generate_204)
-    [ "$HTTP_CODE" = "204" ] && return 0 || return 1
+    # Multi-URL: Независимые серверы для проверки связи (Google, Cloudflare, Apple)
+    URLS="http://www.gstatic.com/generate_204 http://cp.cloudflare.com/generate_204 http://captive.apple.com/hotspot-detect.html"
+    
+    for url in $URLS; do
+        HTTP_CODE=$(curl -s -m 7 -o /dev/null -w "%{http_code}" -x socks5h://127.0.0.1:4534 "$url")
+        # Если хотя бы один ответил 204 или 200, туннель 100% жив
+        if [ "$HTTP_CODE" = "204" ] || [ "$HTTP_CODE" = "200" ]; then
+            return 0
+        fi
+    done
+    
+    # Если никто из трех гигантов не ответил, значит VPN реально заблокирован
+    return 1
 }
 
+# --- ОСНОВНАЯ ЛОГИКА ---
 if pidof sing-box >/dev/null; then
     if check_tunnel; then
         ip route del unreachable 198.18.0.0/15 >/dev/null 2>&1
@@ -63,7 +72,7 @@ if pidof sing-box >/dev/null; then
             if [ -f "$STALL_FLAG" ]; then
                 kill_vpn
             else
-                logger -t VPN-Watchdog "Туннель завис. Быстрый рестарт Podkop (ждем 40 сек)..."
+                logger -t "Watchdog[$W_VER]" "Туннель завис. Быстрый рестарт Podkop..."
                 /etc/init.d/podkop restart
                 touch "$STALL_FLAG"
                 sleep 40
@@ -74,15 +83,19 @@ else
     if [ -f "$FLAG_FILE" ]; then
         LAST_KILL=$(cat "$FLAG_FILE")
         NOW=$(date +%s)
-        if [ $((NOW - LAST_KILL)) -gt 300 ]; then
-            logger -t VPN-Watchdog "Пробуем восстановить туннель..."
+        
+        # Проверяем восстановление каждую минуту (60 сек)
+        if [ $((NOW - LAST_KILL)) -gt 60 ]; then
+            logger -t "Watchdog[$W_VER]" "Пробуем восстановить туннель..."
             ip route del unreachable 198.18.0.0/15 >/dev/null 2>&1
             /etc/init.d/podkop start
             sleep 40 
+            
             if check_tunnel; then
-                logger -t VPN-Watchdog "VPN успешно восстановлен!"
+                logger -t "Watchdog[$W_VER]" "✅ VPN успешно восстановлен!"
                 rm -f "$FLAG_FILE" "$STALL_FLAG"
             else
+                logger -t "Watchdog[$W_VER]" "Сервер все еще заблокирован. Ждем дальше."
                 kill_vpn
             fi
         fi
@@ -92,12 +105,15 @@ fi
 rm -f "$LOCK_FILE"
 EOF
 
+# Автоматически прописываем версию в готовый скрипт
+sed -i "s/VERSION_PLACEHOLDER/$VERSION/g" /etc/watchdog-vpn.sh
 chmod +x /etc/watchdog-vpn.sh
 
+# 3. Обновляем планировщик (запуск каждую минуту)
 sed -i '/watchdog-vpn.sh/d' /etc/crontabs/root
-echo "*/3 * * * * /etc/watchdog-vpn.sh" >> /etc/crontabs/root
+echo "* * * * * /etc/watchdog-vpn.sh" >> /etc/crontabs/root
 
-# После изменения настроек Podkop (открытия порта) его нужно перезапустить
+# 4. Применяем настройки
 /etc/init.d/podkop restart
 /etc/init.d/cron restart
 
@@ -106,4 +122,4 @@ if ! grep -q "/etc/watchdog-vpn.sh" /etc/sysupgrade.conf; then
 fi
 
 sync
-echo "Готово! Watchdog v7 установлен и полностью адаптирован."
+echo "Готово! Watchdog $VERSION успешно установлен."
