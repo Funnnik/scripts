@@ -2,10 +2,8 @@
 # ==============================================================
 # Автор: Funnnik
 # Совместимость: Ubuntu 22.04 / 24.04+
-# Версия: 2.1
+# Версия: 2.2
 # ==============================================================
-
-#!/bin/bash
 
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
@@ -35,27 +33,50 @@ while true; do
 done
 
 if [[ "$VPN_TYPE" == "awg" ]]; then
-    read -p "2. Какую подсеть будете использовать для клиентов AmneziaWG? (например, 10.187.201.0/24): " AWG_SUBNET
-    if [[ -z "$AWG_SUBNET" ]]; then
+    read -p "2. Какую подсеть использовать для AmneziaWG? (введите подсеть, пустой ввод для по-умолчанию, или 'r' для случайной из 10.x.x.0/24): " AWG_SUBNET_ANS
+    if [[ -z "$AWG_SUBNET_ANS" ]]; then
         AWG_SUBNET="10.187.201.0/24"
-        echo -e "${YELLOW}Поле оставлено пустым. Используем подсеть по умолчанию: $AWG_SUBNET${NC}"
+        echo -e "${YELLOW}Поле оставлено пустым. Используем подсеть: $AWG_SUBNET${NC}"
+    elif [[ "$AWG_SUBNET_ANS" == "r" ]]; then
+        AWG_SUBNET="10.$((RANDOM % 256)).$((RANDOM % 256)).0/24"
+        echo -e "${YELLOW}Сгенерирована случайная подсеть: $AWG_SUBNET${NC}"
+    else
+        AWG_SUBNET=$AWG_SUBNET_ANS
     fi
+    
+    read -p "3. Какой порт использовать для AmneziaWG? (введите порт или 'r' для случайного): " AWG_PORT_ANS
+    if [[ "$AWG_PORT_ANS" == "r" ]]; then
+        # Генерируем порт от 10000 до 55000
+        AWG_PORT=$((RANDOM % 45001 + 10000))
+        echo -e "${YELLOW}Сгенерирован случайный порт: $AWG_PORT${NC}"
+    else
+        AWG_PORT=$AWG_PORT_ANS
+    fi
+    # Корректируем номера следующих вопросов
+    NEXT_Q=4
 else
-    # Переменная для сохранения нумерации вопросов при выборе vless
     AWG_SUBNET=""
+    AWG_PORT=""
+    NEXT_Q=2
 fi
 
-read -p "3. Включить пинг только для доверенных сетей? (y/n/yes/no): " PING_ANS
+read -p "$NEXT_Q. Включить пинг только для доверенных сетей? (y/n/yes/no): " PING_ANS
 PING_ANS=$(echo "$PING_ANS" | tr '[:upper:]' '[:lower:]')
+NEXT_Q=$((NEXT_Q + 1))
 
-read -p "4. Установить защищенные DoT серверы (Google + Cloudflare)? (y/n/yes/no): " DOT_ANS
+read -p "$NEXT_Q. Установить защищенные DoT серверы (Google + Cloudflare)? (y/n/yes/no): " DOT_ANS
 DOT_ANS=$(echo "$DOT_ANS" | tr '[:upper:]' '[:lower:]')
+NEXT_Q=$((NEXT_Q + 1))
+
+read -p "$NEXT_Q. Отключить IPv6 полностью? (y/n/yes/no): " IPV6_ANS
+IPV6_ANS=$(echo "$IPV6_ANS" | tr '[:upper:]' '[:lower:]')
+NEXT_Q=$((NEXT_Q + 1))
 
 if [[ "$VPN_TYPE" == "awg" ]]; then
-    echo -e "${YELLOW}5. Для AmneziaWG (awg) Docker будет установлен автоматически.${NC}"
+    echo -e "${YELLOW}$NEXT_Q. Для AmneziaWG (awg) Docker будет установлен автоматически.${NC}"
     DOCKER_ANS="y"
 else
-    read -p "5. Установить ли Docker? (y/n/yes/no): " DOCKER_ANS
+    read -p "$NEXT_Q. Установить ли Docker? (y/n/yes/no): " DOCKER_ANS
     DOCKER_ANS=$(echo "$DOCKER_ANS" | tr '[:upper:]' '[:lower:]')
 fi
 
@@ -63,7 +84,8 @@ echo -e "${GREEN}Спасибо! Начинаю автоматическую н�
 sleep 2
 
 echo -e "\n${YELLOW}[1/10] Обновление системы...${NC}"
-apt update && apt upgrade -y
+export DEBIAN_FRONTEND=noninteractive
+apt update && apt upgrade -y -q -o Dpkg::Options::="--force-confdef" -o Dpkg::Options::="--force-confold"
 
 echo -e "\n${YELLOW}[2/10] Оптимизация ядра для $VPN_TYPE...${NC}"
 cat <<EOF > /etc/sysctl.d/99-vpn-optimizations.conf
@@ -80,6 +102,8 @@ net.core.wmem_default = 1048576
 EOF
     sed -i 's/DEFAULT_FORWARD_POLICY="DROP"/DEFAULT_FORWARD_POLICY="ACCEPT"/' /etc/default/ufw
 elif [[ "$VPN_TYPE" == "vless" ]]; then
+    modprobe tcp_bbr
+    echo "tcp_bbr" > /etc/modules-load.d/bbr.conf
     cat <<EOF >> /etc/sysctl.d/99-vpn-optimizations.conf
 net.core.default_qdisc = fq
 net.ipv4.tcp_congestion_control = bbr
@@ -91,7 +115,7 @@ EOF
 fi
 sysctl --system
 
-echo -e "\n${YELLOW}[4/10] Настройка SWAP...${NC}"
+echo -e "\n${YELLOW}[3/10] Настройка SWAP...${NC}"
 if [ "$(swapon --show | wc -l)" -gt 0 ] || [ "$(free | awk '/^Swap:/ {print $2}')" -gt 0 ]; then
     echo -e "${CYAN}SWAP раздел или файл уже существует. Пропускаем создание.${NC}"
 else
@@ -106,19 +130,37 @@ else
     echo -e "${GREEN}SWAP на 2GB успешно создан и включен.${NC}"
 fi
 
-echo -e "\n${YELLOW}[5/10] Полное отключение IPv6...${NC}"
-cat <<EOF > /etc/sysctl.d/99-disable-ipv6.conf
+echo -e "\n${YELLOW}[4/10] Настройка IPv6...${NC}"
+if [[ "$IPV6_ANS" == "y" || "$IPV6_ANS" == "yes" ]]; then
+    cat <<EOF > /etc/sysctl.d/99-disable-ipv6.conf
 net.ipv6.conf.all.disable_ipv6 = 1
 net.ipv6.conf.default.disable_ipv6 = 1
 net.ipv6.conf.lo.disable_ipv6 = 1
 EOF
-sysctl --system
+    sysctl --system
+    echo -e "${GREEN}IPv6 полностью отключен.${NC}"
+else
+    echo -e "${CYAN}IPv6 оставлен включенным.${NC}"
+fi
 
-echo -e "\n${YELLOW}[6/10] Настройка файрвола UFW...${NC}"
+echo -e "\n${YELLOW}[5/10] Настройка файрвола UFW...${NC}"
 apt install -y ufw
 
 sed -i 's/IPV6=yes/IPV6=no/' /etc/default/ufw
-ufw allow proto tcp from 0.0.0.0/0 to any port 22 comment 'Allow SSH IPv4'
+
+# Динамическое определение порта SSH
+SSH_PORT=$(grep -E "^Port\s" /etc/ssh/sshd_config | awk '{print $2}')
+if [[ -z "$SSH_PORT" ]]; then
+    SSH_PORT=22
+fi
+ufw allow proto tcp from 0.0.0.0/0 to any port $SSH_PORT comment 'Allow SSH IPv4'
+
+if [[ "$VPN_TYPE" == "vless" ]]; then
+    ufw allow 80/tcp comment 'Allow HTTP for VLESS'
+    ufw allow 443/tcp comment 'Allow HTTPS for VLESS'
+elif [[ "$VPN_TYPE" == "awg" && -n "$AWG_PORT" ]]; then
+    ufw allow $AWG_PORT/udp comment 'Allow AmneziaWG'
+fi
 
 if [[ "$VPN_TYPE" == "awg" ]] && ! grep -q "*nat" /etc/ufw/before.rules; then
     echo -e "${CYAN}Добавляю правила NAT (MASQUERADE) для сети $AWG_SUBNET в UFW...${NC}"
@@ -133,7 +175,7 @@ fi
 
 echo "y" | ufw enable
 
-echo -e "\n${YELLOW}[7/10] Настройка Fail2Ban для защиты SSH...${NC}"
+echo -e "\n${YELLOW}[6/10] Настройка Fail2Ban для защиты SSH...${NC}"
 apt install -y fail2ban
 cat <<EOF > /etc/fail2ban/jail.local
 [DEFAULT]
@@ -144,7 +186,7 @@ banaction = ufw
 
 [sshd]
 enabled = true
-port = ssh
+port = $SSH_PORT
 filter = sshd
 logpath = /var/log/auth.log
 maxretry = 3
@@ -152,7 +194,7 @@ EOF
 systemctl enable --now fail2ban
 systemctl restart fail2ban
 
-echo -e "\n${YELLOW}[8/10] Настройка DNS...${NC}"
+echo -e "\n${YELLOW}[7/10] Настройка DNS...${NC}"
 if [[ "$DOT_ANS" == "y" || "$DOT_ANS" == "yes" ]]; then
     echo -e "${CYAN}Настраиваем DoT (Google + Cloudflare)...${NC}"
     cp /etc/systemd/resolved.conf /etc/systemd/resolved.conf.bak
@@ -165,7 +207,7 @@ else
     echo -e "${CYAN}Пропуск настройки DoT.${NC}"
 fi
 
-echo -e "\n${YELLOW}[9/10] Установка среды выполнения...${NC}"
+echo -e "\n${YELLOW}[8/10] Установка среды выполнения (Docker)...${NC}"
 if [[ "$DOCKER_ANS" == "y" || "$DOCKER_ANS" == "yes" ]]; then
     if ! command -v docker &> /dev/null; then
         echo -e "${CYAN}Устанавливаем Docker...${NC}"
@@ -179,12 +221,20 @@ else
     echo -e "${CYAN}Установка Docker пропущена.${NC}"
 fi
 
-echo -e "\n${YELLOW}[10/10] Финализация и очистка системы...${NC}"
+echo -e "\n${YELLOW}[9/10] Очистка системы...${NC}"
+export DEBIAN_FRONTEND=noninteractive
 apt autoremove -y
 apt clean
 
+echo -e "\n${YELLOW}[10/10] Завершение...${NC}"
+echo -e "${CYAN}Финализация завершена.${NC}"
+
 echo -e "\n${GREEN}================================================================${NC}"
 echo -e "${GREEN}✅ Сервер успешно подготовлен! (${VPN_TYPE^^} Edition) ✅${NC}"
+if [[ "$VPN_TYPE" == "awg" ]]; then
+    echo -e "${CYAN}Подсеть AWG: ${AWG_SUBNET}${NC}"
+    echo -e "${CYAN}Порт AWG: ${AWG_PORT}${NC}"
+fi
 echo -e "${GREEN}================================================================${NC}"
 read -p "Нажмите Enter для перезагрузки сервера или Ctrl+C для отмены..."
 echo -e "${YELLOW}Перезагрузка сервера...${NC}"
