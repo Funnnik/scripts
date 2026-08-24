@@ -2,7 +2,7 @@
 # ==============================================================
 # Автор: Funnnik
 # Совместимость: Ubuntu 22.04 / 24.04+
-# Версия: 2.2
+# Версия: 2.3
 # ==============================================================
 
 GREEN='\033[0;32m'
@@ -46,19 +46,28 @@ if [[ "$VPN_TYPE" == "awg" ]]; then
     
     read -p "3. Какой порт использовать для AmneziaWG? (введите порт или 'r' для случайного): " AWG_PORT_ANS
     if [[ "$AWG_PORT_ANS" == "r" ]]; then
-        # Генерируем порт от 10000 до 55000
-        AWG_PORT=$((RANDOM % 45001 + 10000))
-        echo -e "${YELLOW}Сгенерирован случайный порт: $AWG_PORT${NC}"
+        # Генерируем порт от 40000 до 65535 (максимально допустимый порт)
+        AWG_PORT=$(shuf -i 40000-65535 -n 1)
+        echo -e "${YELLOW}Сгенерирован случайный порт AWG: $AWG_PORT${NC}"
     else
         AWG_PORT=$AWG_PORT_ANS
     fi
-    # Корректируем номера следующих вопросов
     NEXT_Q=4
 else
     AWG_SUBNET=""
     AWG_PORT=""
     NEXT_Q=2
 fi
+
+read -p "$NEXT_Q. Какой порт использовать для веб-интерфейса панели? (введите порт или 'r' для случайного): " WEB_PORT_ANS
+if [[ "$WEB_PORT_ANS" == "r" ]]; then
+    # Генерируем порт от 30000 до 65535
+    WEB_PORT=$(shuf -i 30000-65535 -n 1)
+    echo -e "${YELLOW}Сгенерирован случайный порт для Web UI: $WEB_PORT${NC}"
+else
+    WEB_PORT=$WEB_PORT_ANS
+fi
+NEXT_Q=$((NEXT_Q + 1))
 
 read -p "$NEXT_Q. Включить пинг только для доверенных сетей? (y/n/yes/no): " PING_ANS
 PING_ANS=$(echo "$PING_ANS" | tr '[:upper:]' '[:lower:]')
@@ -155,6 +164,9 @@ if [[ -z "$SSH_PORT" ]]; then
 fi
 ufw allow proto tcp from 0.0.0.0/0 to any port $SSH_PORT comment 'Allow SSH IPv4'
 
+# Открываем порт для веб-интерфейса (только TCP)
+ufw allow $WEB_PORT/tcp comment 'Allow Web UI'
+
 if [[ "$VPN_TYPE" == "vless" ]]; then
     ufw allow 80/tcp comment 'Allow HTTP for VLESS'
     ufw allow 443/tcp comment 'Allow HTTPS for VLESS'
@@ -235,6 +247,7 @@ if [[ "$VPN_TYPE" == "awg" ]]; then
     echo -e "${CYAN}Подсеть AWG: ${AWG_SUBNET}${NC}"
     echo -e "${CYAN}Порт AWG: ${AWG_PORT}${NC}"
 fi
+echo -e "${CYAN}Порт Web-интерфейса: ${WEB_PORT}${NC}"
 echo -e "${GREEN}================================================================${NC}"
 read -p "Нажмите Enter для перезагрузки сервера или Ctrl+C для отмены..."
 echo -e "${YELLOW}Перезагрузка сервера...${NC}"
